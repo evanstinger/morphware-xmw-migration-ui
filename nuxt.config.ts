@@ -25,6 +25,10 @@ export default defineNuxtConfig({
 
   compatibilityDate: '2026-02-20',
 
+  nitro: {
+    preset: 'vercel'
+  },
+
   eslint: {
     config: {
       stylistic: {

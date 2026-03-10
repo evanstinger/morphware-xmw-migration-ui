@@ -351,7 +351,7 @@ watch(() => web3Store.chainId, () => {
                 color="neutral"
                 variant="solid"
                 class="bg-white text-black hover:bg-white/90"
-                to="https://app.uniswap.org/explore/tokens/ethereum/0x391cf4b21f557c935c7f670218ef42c21bd8d686"
+                to="https://1inch.com/trade?mode=market&src=1:0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee&dst=1:0xf11e5a75c0e098468564e9ba12fb6415971363a5"
               >
                 XMW
                 <UIcon
@@ -705,15 +705,15 @@ watch(() => web3Store.chainId, () => {
 
             <div class="text-center">
               <p class="text-white/40 text-sm">
-                Contract:
-                <ClientOnly :fallback="shortenAddress(migrationContract.address || '')">
+                New Token Contract:
+                <ClientOnly fallback="0xF11E5A75C0E098468564E9Ba12Fb6415971363A5">
                   <a
-                    :href="`${explorerBaseUrl}/address/${migrationContract.address}`"
+                    :href="`${explorerBaseUrl}/address/0xF11E5A75C0E098468564E9Ba12Fb6415971363A5`"
                     target="_blank"
                     rel="noopener noreferrer"
                     class="text-white/60 hover:text-white underline"
                   >
-                    {{ shortenAddress(migrationContract.address || '') }}
+                    {{ shortenAddress('0xF11E5A75C0E098468564E9Ba12Fb6415971363A5') }}
                   </a>
                 </ClientOnly>
               </p>

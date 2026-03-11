@@ -347,7 +347,7 @@ watch(() => web3Store.chainId, () => {
                   class="w-4 h-4"
                 />
               </UButton>
-              <UButton
+              <!-- <UButton
                 color="neutral"
                 variant="solid"
                 class="bg-white text-black hover:bg-white/90"
@@ -358,7 +358,7 @@ watch(() => web3Store.chainId, () => {
                   name="i-lucide-arrow-up-right"
                   class="w-4 h-4"
                 />
-              </UButton>
+              </UButton> -->
             </template>
             <template v-else>
               <UButton

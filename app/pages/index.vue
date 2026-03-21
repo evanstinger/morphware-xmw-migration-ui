@@ -367,12 +367,12 @@ watch(() => web3Store.chainId, () => {
         <div class="max-w-7xl mx-auto w-full grid lg:grid-cols-2 gap-12 lg:gap-24 items-center">
           <div class="space-y-6">
             <h1 class="text-5xl lg:text-7xl font-light text-white leading-tight">
-              Migration<br>
-              Revert
+              Coming Home
             </h1>
             <p class="text-white/70 text-lg max-w-md">
-              The community cancelled the migration program.
-              Revert migrated XMW back to the original token at 1:1 with no fees.
+              After careful consideration, the previously announced migration from $XMW to $MW has been cancelled. $XMW remains the official token of the Morphware ecosystem.
+
+              <br>Holders who converted their $XMW to $MW can redeem their tokens back to $XMW at a 1:1 ratio.
             </p>
           </div>
 

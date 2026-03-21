@@ -1,6 +1,6 @@
 import { useContract } from './useContract'
 
-const MORPHWARE_MIGRATION_ABI = [
+const MORPHWARE_REVERT_MIGRATION_ABI = [
   {
     inputs: [
       { internalType: 'address', name: '_oldToken', type: 'address' },
@@ -11,24 +11,25 @@ const MORPHWARE_MIGRATION_ABI = [
   },
   {
     inputs: [{ internalType: 'uint256', name: 'amount', type: 'uint256' }],
-    name: 'migrate',
+    name: 'revertMigration',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function'
   },
   {
     inputs: [{ internalType: 'address', name: 'user', type: 'address' }],
-    name: 'getMigrationMetrics',
+    name: 'getRevertMetrics',
     outputs: [{
       components: [
-        { internalType: 'uint256', name: 'userMigratedAmount', type: 'uint256' },
+        { internalType: 'uint256', name: 'userReverted', type: 'uint256' },
         { internalType: 'uint256', name: 'userOldTokenBalance', type: 'uint256' },
         { internalType: 'uint256', name: 'userNewTokenBalance', type: 'uint256' },
+        { internalType: 'uint256', name: 'contractOldTokenBalance', type: 'uint256' },
         { internalType: 'uint256', name: 'contractNewTokenBalance', type: 'uint256' },
-        { internalType: 'uint256', name: 'totalMigratedAmount', type: 'uint256' },
+        { internalType: 'uint256', name: 'totalReverted', type: 'uint256' },
         { internalType: 'uint8', name: 'decimals', type: 'uint8' }
       ],
-      internalType: 'struct MorphwareMigration.MigrationMetrics',
+      internalType: 'struct MorphwareRevert.RevertMetrics',
       name: 'metrics',
       type: 'tuple'
     }],
@@ -51,14 +52,14 @@ const MORPHWARE_MIGRATION_ABI = [
   },
   {
     inputs: [],
-    name: 'totalMigrated',
+    name: 'totalReverted',
     outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
     stateMutability: 'view',
     type: 'function'
   },
   {
     inputs: [{ internalType: 'address', name: '', type: 'address' }],
-    name: 'userMigrated',
+    name: 'userReverted',
     outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
     stateMutability: 'view',
     type: 'function'
@@ -83,7 +84,7 @@ const MORPHWARE_MIGRATION_ABI = [
       { indexed: true, internalType: 'address', name: 'user', type: 'address' },
       { indexed: false, internalType: 'uint256', name: 'amount', type: 'uint256' }
     ],
-    name: 'TokensMigrated',
+    name: 'MigrationReverted',
     type: 'event'
   }
 ]
@@ -133,35 +134,37 @@ const ERC20_ABI = [
   }
 ]
 
-export interface MigrationMetrics {
-  userMigratedAmount: bigint
+export interface RevertMetrics {
+  userReverted: bigint
   userOldTokenBalance: bigint
   userNewTokenBalance: bigint
+  contractOldTokenBalance: bigint
   contractNewTokenBalance: bigint
-  totalMigratedAmount: bigint
+  totalReverted: bigint
   decimals: number
 }
 
-export const useMigrationContract = () => {
+export const useMigrationRevertContract = () => {
   const config = useRuntimeConfig()
-  const contractAddress = config.public.migrationContractAddress as string
+  const contractAddress = config.public.migrationRevertContractAddress as string
   const chainId = Number(config.public.chainId) || 56
 
   const contract = useContract({
     address: contractAddress,
-    abi: MORPHWARE_MIGRATION_ABI,
+    abi: MORPHWARE_REVERT_MIGRATION_ABI,
     chainId,
     preferWalletRead: chainId === 1
   })
 
-  const getMetrics = async (userAddress: string): Promise<MigrationMetrics> => {
-    const result = await contract.read('getMigrationMetrics', [userAddress])
+  const getRevertMetrics = async (userAddress: string): Promise<RevertMetrics> => {
+    const result = await contract.read('getRevertMetrics', [userAddress])
     return {
-      userMigratedAmount: contract.asBigInt(result.userMigratedAmount),
+      userReverted: contract.asBigInt(result.userReverted),
       userOldTokenBalance: contract.asBigInt(result.userOldTokenBalance),
       userNewTokenBalance: contract.asBigInt(result.userNewTokenBalance),
+      contractOldTokenBalance: contract.asBigInt(result.contractOldTokenBalance),
       contractNewTokenBalance: contract.asBigInt(result.contractNewTokenBalance),
-      totalMigratedAmount: contract.asBigInt(result.totalMigratedAmount),
+      totalReverted: contract.asBigInt(result.totalReverted),
       decimals: contract.asNumber(result.decimals)
     }
   }
@@ -174,8 +177,8 @@ export const useMigrationContract = () => {
     return contract.read('newToken')
   }
 
-  const migrate = async (amount: bigint) => {
-    return contract.write('migrate', [amount])
+  const revertMigration = async (amount: bigint) => {
+    return contract.write('revertMigration', [amount])
   }
 
   const getPaused = async (): Promise<boolean> => {
@@ -204,10 +207,10 @@ export const useMigrationContract = () => {
     ...contract,
     address: contractAddress,
     chainId,
-    getMetrics,
+    getRevertMetrics,
     getOldTokenAddress,
     getNewTokenAddress,
-    migrate,
+    revertMigration,
     getPaused,
     getOldTokenContract,
     getNewTokenContract

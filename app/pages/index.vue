@@ -1,30 +1,33 @@
 <script setup lang="ts">
 import { useWeb3Store } from '~/stores/web3'
-import { useMigrationContract, type MigrationMetrics } from '~/composables/useMigrationContract'
+import { useMigrationRevertContract, type RevertMetrics } from '~/composables/useMigrationRevertContract'
 import { shortenAddress, formatTokenAmount } from '~/utils/string'
 import { MaxUint256, parseUnits } from 'ethers'
 
 const web3Store = useWeb3Store()
-const migrationContract = useMigrationContract()
+const migrationRevertContract = useMigrationRevertContract()
 const runtimeConfig = useRuntimeConfig()
 const toast = useToast()
 
-const metrics = ref<MigrationMetrics | null>(null)
+const metrics = ref<RevertMetrics | null>(null)
 const oldTokenSymbol = ref('XMW')
 const newTokenSymbol = ref('XMW')
-const migrateAmount = ref('')
+const revertAmount = ref('')
 const isApproving = ref(false)
-const isMigrating = ref(false)
-const oldTokenAllowance = ref(0n)
+const isReverting = ref(false)
+const newTokenAllowance = ref(0n)
 const error = ref('')
 const isPaused = ref(false)
 
 const explorerBaseUrl = 'https://etherscan.io'
+const revertContractAddress = computed(() => {
+  return (runtimeConfig.public.migrationRevertContractAddress as string) || migrationRevertContract.address
+})
 
 const resetUiState = () => {
   metrics.value = null
-  oldTokenAllowance.value = 0n
-  migrateAmount.value = ''
+  newTokenAllowance.value = 0n
+  revertAmount.value = ''
   error.value = ''
   isPaused.value = false
 }
@@ -43,37 +46,37 @@ const refreshMetrics = async () => {
   error.value = ''
   try {
     const [nextMetrics, oldTokenAddr, newTokenAddr, paused] = await Promise.all([
-      migrationContract.getMetrics(web3Store.address),
-      migrationContract.getOldTokenAddress(),
-      migrationContract.getNewTokenAddress(),
-      migrationContract.getPaused()
+      migrationRevertContract.getRevertMetrics(web3Store.address),
+      migrationRevertContract.getOldTokenAddress(),
+      migrationRevertContract.getNewTokenAddress(),
+      migrationRevertContract.getPaused()
     ])
 
-    const oldTokenContract = migrationContract.getOldTokenContract(oldTokenAddr)
-    const newTokenContract = migrationContract.getNewTokenContract(newTokenAddr)
+    const oldTokenContract = migrationRevertContract.getOldTokenContract(oldTokenAddr)
+    const newTokenContract = migrationRevertContract.getNewTokenContract(newTokenAddr)
 
     const [oldSymbol, newSymbol, allowance] = await Promise.all([
       oldTokenContract.read('symbol'),
       newTokenContract.read('symbol'),
-      oldTokenContract.read('allowance', [web3Store.address, migrationContract.address])
+      newTokenContract.read('allowance', [web3Store.address, migrationRevertContract.address])
     ])
 
     metrics.value = nextMetrics
     isPaused.value = paused
     oldTokenSymbol.value = oldSymbol
     newTokenSymbol.value = newSymbol
-    oldTokenAllowance.value = migrationContract.asBigInt(allowance)
+    newTokenAllowance.value = migrationRevertContract.asBigInt(allowance)
   } catch (e: unknown) {
-    error.value = getErrorMessage(e, 'Failed to fetch migration data')
+    error.value = getErrorMessage(e, 'Failed to fetch revert data')
   }
 }
 
 const checkAllowance = async () => {
   if (!web3Store.address) return
-  const oldTokenAddr = await migrationContract.getOldTokenAddress()
-  const oldTokenContract = migrationContract.getOldTokenContract(oldTokenAddr)
-  const allowance = await oldTokenContract.read('allowance', [web3Store.address, migrationContract.address])
-  oldTokenAllowance.value = migrationContract.asBigInt(allowance)
+  const newTokenAddr = await migrationRevertContract.getNewTokenAddress()
+  const newTokenContract = migrationRevertContract.getNewTokenContract(newTokenAddr)
+  const allowance = await newTokenContract.read('allowance', [web3Store.address, migrationRevertContract.address])
+  newTokenAllowance.value = migrationRevertContract.asBigInt(allowance)
 }
 
 const normalizeAmountInput = (value: string): string => {
@@ -99,17 +102,17 @@ const normalizeAmountInput = (value: string): string => {
   return normalized
 }
 
-const sanitizeMigrateAmount = () => {
-  const normalized = normalizeAmountInput(migrateAmount.value)
-  if (normalized !== migrateAmount.value) {
-    migrateAmount.value = normalized
+const sanitizeRevertAmount = () => {
+  const normalized = normalizeAmountInput(revertAmount.value)
+  if (normalized !== revertAmount.value) {
+    revertAmount.value = normalized
   }
 }
 
-const parsedMigrateAmount = computed<bigint | null>(() => {
+const parsedRevertAmount = computed<bigint | null>(() => {
   if (!metrics.value) return null
 
-  const normalizedAmount = normalizeAmountInput(migrateAmount.value)
+  const normalizedAmount = normalizeAmountInput(revertAmount.value)
   if (!normalizedAmount) return null
 
   const [_, fraction = ''] = normalizedAmount.split('.')
@@ -128,9 +131,9 @@ const parsedMigrateAmount = computed<bigint | null>(() => {
 })
 
 const amountValidationError = computed(() => {
-  if (!migrateAmount.value || !metrics.value) return ''
+  if (!revertAmount.value || !metrics.value) return ''
 
-  const normalizedAmount = normalizeAmountInput(migrateAmount.value)
+  const normalizedAmount = normalizeAmountInput(revertAmount.value)
   if (!normalizedAmount) return 'Enter a valid number'
   if (normalizedAmount.endsWith('.')) return ''
 
@@ -139,34 +142,33 @@ const amountValidationError = computed(() => {
     return `Max ${metrics.value.decimals} decimal places`
   }
 
-  const amount = parsedMigrateAmount.value
+  const amount = parsedRevertAmount.value
   if (amount === null) return 'Enter a valid amount'
   if (amount <= 0n) return 'Amount must be greater than 0'
-  if (amount > metrics.value.userOldTokenBalance) return 'Amount exceeds balance'
+  if (amount > metrics.value.userNewTokenBalance) return 'Amount exceeds balance'
 
   return ''
 })
 
 const approveTokens = async () => {
   if (!metrics.value || isApproving.value || isPaused.value) return
-  const amount = parsedMigrateAmount.value
-  if (amount === null || amount <= 0n || amount > metrics.value.userOldTokenBalance) return
+  const amount = parsedRevertAmount.value
+  if (amount === null || amount <= 0n || amount > metrics.value.userNewTokenBalance) return
 
   isApproving.value = true
   error.value = ''
 
   try {
-    const oldTokenAddr = await migrationContract.getOldTokenAddress()
-    const oldTokenContract = migrationContract.getOldTokenContract(oldTokenAddr)
-    const contractAddress = runtimeConfig.public.migrationContractAddress as string
+    const newTokenAddr = await migrationRevertContract.getNewTokenAddress()
+    const newTokenContract = migrationRevertContract.getNewTokenContract(newTokenAddr)
 
-    const tx = await oldTokenContract.write('approve', [contractAddress, MaxUint256])
+    const tx = await newTokenContract.write('approve', [revertContractAddress.value, MaxUint256])
 
     await tx.wait()
 
     toast.add({
       title: 'Approval Successful',
-      description: 'You can now proceed to migrate your tokens.',
+      description: 'You can now proceed to revert your tokens.',
       icon: 'i-lucide-check-circle',
       color: 'success',
       actions: [{
@@ -186,19 +188,19 @@ const approveTokens = async () => {
   }
 }
 
-const migrateTokens = async () => {
-  if (!metrics.value || isMigrating.value || isPaused.value) return
-  const amount = parsedMigrateAmount.value
-  if (amount === null || amount <= 0n || amount > metrics.value.userOldTokenBalance || oldTokenAllowance.value < amount) return
+const revertTokens = async () => {
+  if (!metrics.value || isReverting.value || isPaused.value) return
+  const amount = parsedRevertAmount.value
+  if (amount === null || amount <= 0n || amount > metrics.value.userNewTokenBalance || newTokenAllowance.value < amount) return
 
-  isMigrating.value = true
+  isReverting.value = true
   error.value = ''
 
   try {
-    const tx = await migrationContract.migrate(amount)
+    const tx = await migrationRevertContract.revertMigration(amount)
 
     toast.add({
-      title: 'Migration Submitted',
+      title: 'Revert Submitted',
       description: 'Transaction has been submitted to the network.',
       icon: 'i-lucide-send',
       color: 'warning',
@@ -214,8 +216,8 @@ const migrateTokens = async () => {
     await tx.wait()
 
     toast.add({
-      title: 'Migration Successful',
-      description: 'Your tokens have been successfully migrated.',
+      title: 'Revert Successful',
+      description: 'Your tokens have been successfully reverted.',
       icon: 'i-lucide-party-popper',
       color: 'success',
       duration: 0,
@@ -229,43 +231,43 @@ const migrateTokens = async () => {
     })
 
     await refreshMetrics()
-    migrateAmount.value = ''
+    revertAmount.value = ''
   } catch (e: unknown) {
-    error.value = getErrorMessage(e, 'Failed to migrate tokens')
+    error.value = getErrorMessage(e, 'Failed to revert tokens')
   } finally {
-    isMigrating.value = false
+    isReverting.value = false
   }
 }
 
 const setMaxAmount = () => {
   if (!metrics.value) return
-  migrateAmount.value = formatTokenAmount(metrics.value.userOldTokenBalance, metrics.value.decimals)
+  revertAmount.value = formatTokenAmount(metrics.value.userNewTokenBalance, metrics.value.decimals)
 }
 
 const needsApproval = computed(() => {
   if (!metrics.value) return false
-  const amount = parsedMigrateAmount.value
-  if (amount === null || amount <= 0n || amount > metrics.value.userOldTokenBalance) return false
-  return oldTokenAllowance.value < amount
+  const amount = parsedRevertAmount.value
+  if (amount === null || amount <= 0n || amount > metrics.value.userNewTokenBalance) return false
+  return newTokenAllowance.value < amount
 })
 
 const canApprove = computed(() => {
   if (!metrics.value || !web3Store.isConnected || isPaused.value || isApproving.value) return false
-  const amount = parsedMigrateAmount.value
-  if (amount === null || amount <= 0n || amount > metrics.value.userOldTokenBalance) return false
-  return oldTokenAllowance.value < amount
+  const amount = parsedRevertAmount.value
+  if (amount === null || amount <= 0n || amount > metrics.value.userNewTokenBalance) return false
+  return newTokenAllowance.value < amount
 })
 
-const canMigrate = computed(() => {
+const canRevert = computed(() => {
   if (!metrics.value || !web3Store.isConnected || isPaused.value) return false
   if (amountValidationError.value) return false
-  const amount = parsedMigrateAmount.value
+  const amount = parsedRevertAmount.value
   if (amount === null || amount <= 0n) return false
-  return amount <= metrics.value.userOldTokenBalance && oldTokenAllowance.value >= amount
+  return amount <= metrics.value.userNewTokenBalance && newTokenAllowance.value >= amount
 })
 
-const canSubmitMigrate = computed(() => {
-  return canMigrate.value && !isMigrating.value && !needsApproval.value
+const canSubmitRevert = computed(() => {
+  return canRevert.value && !isReverting.value && !needsApproval.value
 })
 
 watch(() => web3Store.address, () => {
@@ -282,7 +284,7 @@ watch(() => web3Store.chainId, () => {
     return
   }
 
-  if (web3Store.chainId === migrationContract.chainId) {
+  if (web3Store.chainId === migrationRevertContract.chainId) {
     refreshMetrics()
   } else {
     resetUiState()
@@ -334,46 +336,29 @@ watch(() => web3Store.chainId, () => {
 
         <ClientOnly>
           <div class="flex items-center gap-3">
-            <template v-if="!web3Store.isConnected">
-              <UButton
-                color="neutral"
-                variant="ghost"
-                class="text-white hover:text-white/80"
-                to="https://app.morphware.com/"
-              >
-                LOG IN
-                <UIcon
-                  name="i-lucide-arrow-up-right"
-                  class="w-4 h-4"
-                />
-              </UButton>
-              <!-- <UButton
-                color="neutral"
-                variant="solid"
-                class="bg-white text-black hover:bg-white/90"
-                to="https://1inch.com/trade?mode=market&src=1:0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee&dst=1:0xf11e5a75c0e098468564e9ba12fb6415971363a5"
-              >
-                XMW
-                <UIcon
-                  name="i-lucide-arrow-up-right"
-                  class="w-4 h-4"
-                />
-              </UButton> -->
-            </template>
-            <template v-else>
-              <UButton
-                color="neutral"
-                variant="solid"
-                class="bg-white text-black hover:bg-white/90"
-                @click="web3Store.disconnectWallet()"
-              >
-                {{ shortenAddress(web3Store.address || '') }}
-                <UIcon
-                  name="i-lucide-log-out"
-                  class="w-4 h-4"
-                />
-              </UButton>
-            </template>
+            <UButton
+              v-if="web3Store.address"
+              color="neutral"
+              variant="solid"
+              class="bg-white text-black hover:bg-white/90"
+              @click="web3Store.disconnectWallet()"
+            >
+              {{ shortenAddress(web3Store.address) }}
+              <UIcon
+                name="i-lucide-log-out"
+                class="w-4 h-4"
+              />
+            </UButton>
+            <UButton
+              v-else
+              color="neutral"
+              variant="solid"
+              size="lg"
+              class="px-8 font-medium bg-white text-black hover:bg-white/90"
+              @click="web3Store.connectWallet()"
+            >
+              Connect Wallet
+            </UButton>
           </div>
         </ClientOnly>
       </header>
@@ -382,12 +367,12 @@ watch(() => web3Store.chainId, () => {
         <div class="max-w-7xl mx-auto w-full grid lg:grid-cols-2 gap-12 lg:gap-24 items-center">
           <div class="space-y-6">
             <h1 class="text-5xl lg:text-7xl font-light text-white leading-tight">
-              Token<br>
-              Migration
+              Migration<br>
+              Revert
             </h1>
             <p class="text-white/70 text-lg max-w-md">
-              Seamlessly migrate your XMW tokens from the old contract to the new one.
-              1:1 conversion ratio with no fees.
+              The community cancelled the migration program.
+              Revert migrated XMW back to the original token at 1:1 with no fees.
             </p>
           </div>
 
@@ -405,10 +390,10 @@ watch(() => web3Store.chainId, () => {
                   <div class="flex items-center justify-between">
                     <div>
                       <h2 class="text-white font-semibold text-xl tracking-tight">
-                        Migration Status
+                        Revert Status
                       </h2>
                       <p class="text-white/40 text-sm mt-1">
-                        Track your token migration progress
+                        Track your token revert progress
                       </p>
                     </div>
                     <UBadge
@@ -454,7 +439,7 @@ watch(() => web3Store.chainId, () => {
                       Connect Wallet
                     </h3>
                     <p class="text-white/40 mb-6 max-w-xs mx-auto">
-                      Connect your wallet to view your balance and start the migration process.
+                      Connect your wallet to view your balance and start the revert process.
                     </p>
                     <UButton
                       color="neutral"
@@ -469,7 +454,7 @@ watch(() => web3Store.chainId, () => {
 
                   <!-- Wrong Network State -->
                   <div
-                    v-else-if="web3Store.chainId !== migrationContract.chainId"
+                    v-else-if="web3Store.chainId !== migrationRevertContract.chainId"
                     class="text-center py-12 px-4 rounded-xl bg-white/5 border border-white/5"
                   >
                     <div class="w-16 h-16 bg-amber-500/10 rounded-full flex items-center justify-center mx-auto mb-4 ring-1 ring-amber-500/20">
@@ -482,14 +467,14 @@ watch(() => web3Store.chainId, () => {
                       Wrong Network
                     </h3>
                     <p class="text-white/40 mb-6 max-w-xs mx-auto">
-                      Please switch your wallet to the configured migration network to continue.
+                      Please switch your wallet to the configured revert network to continue.
                     </p>
                     <UButton
                       color="neutral"
                       variant="solid"
                       size="lg"
                       class="px-8 font-medium bg-white text-black hover:bg-white/90"
-                      @click="web3Store.setChain(`0x${migrationContract.chainId.toString(16)}`)"
+                      @click="web3Store.setChain(`0x${migrationRevertContract.chainId.toString(16)}`)"
                     >
                       Switch Network
                     </UButton>
@@ -542,22 +527,22 @@ watch(() => web3Store.chainId, () => {
                         </div>
                       </div>
 
-                      <!-- Migration Stats -->
+                      <!-- Revert Stats -->
                       <div class="col-span-1 sm:col-span-2 grid grid-cols-2 gap-4 bg-black/20 rounded-xl p-4 border border-white/5">
                         <div>
                           <p class="text-white/40 text-xs font-medium uppercase tracking-wider mb-1">
-                            You Migrated
+                            You Reverted
                           </p>
                           <p class="text-white text-lg font-semibold">
-                            {{ formatTokenAmount(metrics.userMigratedAmount, metrics.decimals) }} <span class="text-white/30 text-sm">{{ oldTokenSymbol }}</span>
+                            {{ formatTokenAmount(metrics.userReverted, metrics.decimals) }} <span class="text-white/30 text-sm">{{ newTokenSymbol }}</span>
                           </p>
                         </div>
                         <div class="border-l border-white/5 pl-4">
                           <p class="text-white/40 text-xs font-medium uppercase tracking-wider mb-1">
-                            Total Migrated
+                            Total Reverted
                           </p>
                           <p class="text-white text-lg font-semibold">
-                            {{ formatTokenAmount(metrics.totalMigratedAmount, metrics.decimals) }} <span class="text-white/30 text-sm">{{ oldTokenSymbol }}</span>
+                            {{ formatTokenAmount(metrics.totalReverted, metrics.decimals) }} <span class="text-white/30 text-sm">{{ newTokenSymbol }}</span>
                           </p>
                         </div>
                       </div>
@@ -567,22 +552,22 @@ watch(() => web3Store.chainId, () => {
                     <div class="space-y-4">
                       <div class="relative">
                         <div class="flex justify-between items-center mb-2">
-                          <label class="text-sm font-medium text-white/80">Amount to migrate</label>
+                          <label class="text-sm font-medium text-white/80">Amount to revert</label>
                           <span class="text-xs text-white/40">
-                            Balance: {{ formatTokenAmount(metrics.userOldTokenBalance, metrics.decimals) }} {{ oldTokenSymbol }}
+                            Balance: {{ formatTokenAmount(metrics.userNewTokenBalance, metrics.decimals) }} {{ newTokenSymbol }}
                           </span>
                         </div>
 
                         <div class="relative group/input">
                           <div class="relative bg-black/60 border border-white/10 rounded-xl flex items-center p-1 focus-within:border-white/20 focus-within:bg-black/80 transition-all">
                             <input
-                              v-model="migrateAmount"
+                              v-model="revertAmount"
                               type="text"
                               inputmode="decimal"
                               placeholder="0.00"
                               class="w-full bg-transparent border-none text-white text-2xl font-medium placeholder-white/20 focus:ring-0 focus:outline-none px-4 py-3 appearance-none"
                               min="0"
-                              @input="sanitizeMigrateAmount"
+                              @input="sanitizeRevertAmount"
                             >
                             <div class="flex items-center gap-2 pr-2">
                               <button
@@ -592,7 +577,7 @@ watch(() => web3Store.chainId, () => {
                                 Max
                               </button>
                               <div class="bg-white/10 px-3 py-1.5 rounded-lg">
-                                <span class="text-white font-medium">{{ oldTokenSymbol }}</span>
+                                <span class="text-white font-medium">{{ newTokenSymbol }}</span>
                               </div>
                             </div>
                           </div>
@@ -612,7 +597,7 @@ watch(() => web3Store.chainId, () => {
                           class="h-14 text-base font-bold relative overflow-hidden bg-white text-black hover:bg-white/90"
                           @click="approveTokens"
                         >
-                          <span class="relative z-10">Approve Migration</span>
+                          <span class="relative z-10">Approve Revert</span>
                           <div class="absolute inset-0 bg-gradient-to-r from-emerald-500/20 to-cyan-500/20 opacity-0 hover:opacity-100 transition-opacity" />
                         </UButton>
 
@@ -621,15 +606,15 @@ watch(() => web3Store.chainId, () => {
                           color="neutral"
                           :variant="needsApproval ? 'soft' : 'solid'"
                           block
-                          :loading="isMigrating"
-                          :disabled="!canSubmitMigrate"
+                          :loading="isReverting"
+                          :disabled="!canSubmitRevert"
                           class="h-14 text-base font-bold transition-all duration-300"
-                          :class="canSubmitMigrate ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white shadow-lg shadow-emerald-500/20' : ''"
-                          @click="migrateTokens"
+                          :class="canSubmitRevert ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white shadow-lg shadow-emerald-500/20' : ''"
+                          @click="revertTokens"
                         >
-                          Migrate Tokens
+                          Revert Tokens
                           <UIcon
-                            v-if="!isMigrating && !needsApproval"
+                            v-if="!isReverting && !needsApproval"
                             name="i-lucide-arrow-right"
                             class="w-5 h-5 ml-2"
                           />
@@ -696,7 +681,7 @@ watch(() => web3Store.chainId, () => {
                       class="w-10 h-10 text-emerald-500 animate-spin mx-auto"
                     />
                     <p class="text-white/40 text-sm mt-4 animate-pulse">
-                      Loading migration data...
+                      Loading revert data...
                     </p>
                   </div>
                 </div>
@@ -705,15 +690,15 @@ watch(() => web3Store.chainId, () => {
 
             <div class="text-center">
               <p class="text-white/40 text-sm">
-                New Token Contract:
-                <ClientOnly fallback="0xF11E5A75C0E098468564E9Ba12Fb6415971363A5">
+                Revert Contract:
+                <ClientOnly :fallback="revertContractAddress">
                   <a
-                    :href="`${explorerBaseUrl}/address/0xF11E5A75C0E098468564E9Ba12Fb6415971363A5`"
+                    :href="`${explorerBaseUrl}/address/${revertContractAddress}`"
                     target="_blank"
                     rel="noopener noreferrer"
                     class="text-white/60 hover:text-white underline"
                   >
-                    {{ shortenAddress('0xF11E5A75C0E098468564E9Ba12Fb6415971363A5') }}
+                    {{ shortenAddress(revertContractAddress) }}
                   </a>
                 </ClientOnly>
               </p>
@@ -724,7 +709,7 @@ watch(() => web3Store.chainId, () => {
 
       <footer class="px-6 lg:px-12 py-6 border-t border-white/10">
         <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-white/40">
-          <p>2025 Morphware. All rights reserved.</p>
+          <p>{{ new Date().getFullYear() }} Morphware. All rights reserved.</p>
           <div class="flex items-center gap-6">
             <a
               href="https://www.morphware.com/privacy-policy"

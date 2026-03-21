@@ -11,8 +11,8 @@ useHead({
   }
 })
 
-const title = 'Morphware XMW Migration'
-const description = 'Migrate your XMW tokens from old contract to new contract at 1:1 ratio.'
+const title = 'Morphware XMW Migration Revert'
+const description = 'Migration is cancelled. Revert migrated XMW back to the original token at 1:1 ratio.'
 
 useSeoMeta({
   title,

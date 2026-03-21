@@ -14,19 +14,29 @@ export default defineNuxtConfig({
   runtimeConfig: {
     public: {
       walletConnectProjectId: process.env.NUXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '',
-      migrationContractAddress: process.env.NUXT_PUBLIC_MIGRATION_CONTRACT_ADDRESS || '',
+      migrationRevertContractAddress: process.env.NUXT_PUBLIC_MIGRATION_REVERT_CONTRACT_ADDRESS || '',
       chainId: process.env.NUXT_PUBLIC_CHAIN_ID || '1'
     }
-  },
-
-  routeRules: {
-    '/': { prerender: true }
   },
 
   compatibilityDate: '2026-02-20',
 
   nitro: {
-    preset: 'vercel'
+    preset: 'cloudflare-module',
+    cloudflare: {
+      deployConfig: true,
+      nodeCompat: true,
+      wrangler: {
+        name: 'morphware-migration-ui',
+        compatibility_date: '2026-01-20',
+        compatibility_flags: ['nodejs_compat'],
+        vars: {
+          NUXT_PUBLIC_WALLETCONNECT_PROJECT_ID: '67553a5ab5967c7fce9a5cccdb2de398',
+          NUXT_PUBLIC_MIGRATION_REVERT_CONTRACT_ADDRESS: '0x7a591FCe075Ab3D220E827a79aE3D36bCCA6FD0D',
+          NUXT_PUBLIC_CHAIN_ID: '1'
+        }
+      }
+    }
   },
 
   eslint: {
